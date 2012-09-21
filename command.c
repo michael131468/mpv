@@ -838,16 +838,12 @@ static int mp_property_fullscreen(m_option_t *prop, int action, void *arg,
     if (!mpctx->video_out)
         return M_PROPERTY_UNAVAILABLE;
 
-    switch (action) {
-    case M_PROPERTY_SET:
+    if (action == M_PROPERTY_SET) {
         if (vo_fs == !!*(int *) arg)
             return M_PROPERTY_OK;
         if (mpctx->video_out->config_ok)
             vo_control(mpctx->video_out, VOCTRL_FULLSCREEN, 0);
         mpctx->opts.fullscreen = vo_fs;
-        return M_PROPERTY_OK;
-    case M_PROPERTY_GET:
-        *(int *)arg = vo_fs;
         return M_PROPERTY_OK;
     }
     return mp_property_generic_option(prop, action, arg, mpctx);
@@ -979,16 +975,10 @@ static int mp_property_panscan(m_option_t *prop, int action, void *arg,
         || vo_control(mpctx->video_out, VOCTRL_GET_PANSCAN, NULL) != VO_TRUE)
         return M_PROPERTY_UNAVAILABLE;
 
-    switch (action) {
-    case M_PROPERTY_SET:
-        vo_panscan = *(float *) arg;
+    int r = mp_property_generic_option(prop, action, arg, mpctx);
+    if (action == M_PROPERTY_SET)
         vo_control(mpctx->video_out, VOCTRL_SET_PANSCAN, NULL);
-        return M_PROPERTY_OK;
-    case M_PROPERTY_GET:
-        *(float *)arg = vo_panscan;
-        return M_PROPERTY_OK;
-    }
-    return mp_property_generic_option(prop, action, arg, mpctx);
+    return r;
 }
 
 /// Helper to set vo flags.
@@ -1001,15 +991,11 @@ static int mp_property_vo_flag(m_option_t *prop, int action, void *arg,
     if (!mpctx->video_out)
         return M_PROPERTY_UNAVAILABLE;
 
-    switch (action) {
-    case M_PROPERTY_SET:
+    if (action == M_PROPERTY_SET) {
         if (*vo_var == !!*(int *) arg)
             return M_PROPERTY_OK;
         if (mpctx->video_out->config_ok)
             vo_control(mpctx->video_out, vo_ctrl, 0);
-        return M_PROPERTY_OK;
-    case M_PROPERTY_GET:
-        *(int *)arg = *vo_var;
         return M_PROPERTY_OK;
     }
     return mp_property_generic_option(prop, action, arg, mpctx);
