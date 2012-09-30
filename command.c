@@ -1599,6 +1599,7 @@ static void show_property_osd(MPContext *mpctx, const char *pname,
 
     if (mp_property_do(pname, M_PROPERTY_GET_TYPE, &prop, mpctx) <= 0)
         return;
+    pname = prop.name; // hack to get correct name with legacy bridge involved
 
     // look for the command
     for (p = property_osd_display; p->name; p++) {
