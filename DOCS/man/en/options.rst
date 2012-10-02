@@ -1326,8 +1326,11 @@
     See also ``--user``.
 
 --playing-msg=<string>
-    Print out a string before starting playback. The following expansions are
-    supported:
+    Print out a string before starting playback. The string is expanded for
+    properties, e.g. ``--playing-msg=file: ${filename}`` will print the string
+    ``file: `` followed by the currently played filename.
+
+    The following expansions are supported:
 
     ${NAME}
         Expands to the value of the property ``NAME``. If ``NAME`` starts with
