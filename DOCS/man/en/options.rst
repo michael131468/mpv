@@ -158,7 +158,7 @@ OPTIONS
 
         Using this option may lead to incorrect subtitle rendering.
 
-``--ass-style-override=<yes|no|force>``
+``--ass-style-override=<yes|no|force|override>``
     Control whether user style overrides should be applied.
 
     :yes:   Apply all the ``--ass-*`` style override options. Changing the default
@@ -170,6 +170,9 @@ OPTIONS
             ``--sub-text-...`` option. This won't always work, because the
             dialogue style doesn't necessary use this name, and it might break
             other advanced uses of the ASS format.
+    :override: Try to force the font style as defined by the ``--sub-text-*``
+            options. Requires a modified libass, can break rendering easily.
+            Probably more reliable than ``force``.
 
 ``--ass-use-margins``
     Enables placing toptitles and subtitles in black borders when they are
