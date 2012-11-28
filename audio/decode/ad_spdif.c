@@ -115,6 +115,8 @@ static int init(sh_audio_t *sh)
     const AVOption      *opt        = NULL;
     struct spdifContext *spdif_ctx  = NULL;
 
+    sh->needs_parsing = 1;
+
     spdif_ctx = av_mallocz(sizeof(*spdif_ctx));
     if (!spdif_ctx)
         goto fail;
@@ -227,14 +229,16 @@ static int init(sh_audio_t *sh)
         goto fail;
     spdif_ctx->iec61937_packet_size = x;
     bps = lavc_ctx->bit_rate;
-    if (!bps)
-        if (sh->avctx)
+    if (!bps) {
+        if (sh->avctx) {
             if (sh->avctx->bit_rate)
                 bps = sh->avctx->bit_rate;
             else
                 bps = 768000;
-        else
+        } else {
             bps = 768000;
+        }
+    }
     srate = lavc_ctx->sample_rate;
     if (!srate) {
         if (sh->avctx) {
@@ -250,11 +254,14 @@ static int init(sh_audio_t *sh)
     // setup sh
     sh->channels      = 2;
     sh->i_bps         = bps/8;
-    sh->sample_format = AF_FORMAT_IEC61937_LE;
+    sh->sample_format = AF_FORMAT_AC3_LE;
     sh->samplerate    = srate;
+    sh->samplesize    = 2;
     switch (lavc_ctx->codec_id) {
     case CODEC_ID_AAC:
+        break;
     case CODEC_ID_AC3:
+        sh->sample_format = AF_FORMAT_AC3_BE;
         break;
     case CODEC_ID_DTS:
         opt = av_opt_find(&lavf_ctx->oformat->priv_class,
@@ -311,6 +318,9 @@ static int init(sh_audio_t *sh)
     default:
         break;
     }
+
+    mp_msg(MSGT_DECAUDIO,MSGL_V,"spdif packet size: %d.\n",
+           spdif_ctx->iec61937_packet_size);
 
     spdif_ctx->initialized = 1;
     return 1;
@@ -379,6 +389,8 @@ static int decode_audio(sh_audio_t *sh, unsigned char *buf,
                                       (int16_t*)buf, &len, &pkt);
             if (y == AVERROR(EAGAIN))
                 continue;
+            if (y < 0)
+                abort();
             ret =lavf_ctx->oformat->write_packet(lavf_ctx, &pkt);
             if (ret < 0)
                 return ret;
