@@ -416,6 +416,18 @@ static void uninit(sh_video_t *sh)
     talloc_free(ctx);
 }
 
+static void apply_container_crop(struct sh_video *sh, struct mp_image *mpi)
+{
+    int x0 = MP_ALIGN_UP(sh->crop[0], mpi->fmt.align_x);
+    int y0 = MP_ALIGN_UP(sh->crop[1], mpi->fmt.align_y);
+    int x1 = mpi->w - sh->crop[2];
+    int y1 = mpi->h - sh->crop[3];
+    if (IMGFMT_IS_HWACCEL(mpi->imgfmt))
+        return;
+    if (x1 > x0 && y1 > y0 && x0 >= 0 && y0 >= 0 && x1 <= mpi->w && y1 <= mpi->h)
+        mp_image_crop(mpi, x0, y0, x1, y1);
+}
+
 static int init_vo(sh_video_t *sh, AVFrame *frame)
 {
     vd_ffmpeg_ctx *ctx = sh->context;
@@ -427,6 +439,13 @@ static int init_vo(sh_video_t *sh, AVFrame *frame)
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(54, 40, 0)
     pix_fmt = ctx->avctx->pix_fmt;
 #endif
+
+    struct mp_image crop = {0};
+    mp_image_set_size(&crop, width, height);
+    mp_image_setfmt(&crop, pixfmt2imgfmt(pix_fmt));
+    apply_container_crop(sh, &crop);
+    width = crop.w;
+    height = crop.h;
 
     /* Reconfiguring filter/VO chain may invalidate direct rendering buffers
      * we have allocated for libavcodec (including the VDPAU HW decoding
@@ -449,11 +468,12 @@ static int init_vo(sh_video_t *sh, AVFrame *frame)
         if (sh->aspect == 0 || ctx->last_sample_aspect_ratio.den)
             sh->aspect = aspect;
         ctx->last_sample_aspect_ratio = frame->sample_aspect_ratio;
-        sh->disp_w = width;
-        sh->disp_h = height;
 
         ctx->pix_fmt = pix_fmt;
         ctx->best_csp = pixfmt2imgfmt(pix_fmt);
+
+        sh->disp_w = crop.w;
+        sh->disp_h = crop.h;
 
         sh->colorspace = avcol_spc_to_mp_csp(ctx->avctx->colorspace);
         sh->color_range = avcol_range_to_mp_csp_levels(ctx->avctx->color_range);
@@ -711,6 +731,8 @@ static int decode(struct sh_video *sh, struct demux_packet *packet,
 
     mpi->colorspace = sh->colorspace;
     mpi->levels = sh->color_range;
+
+    apply_container_crop(sh, mpi);
 
     *out_image = mpi;
     return 1;

@@ -97,6 +97,7 @@ typedef struct mkv_track {
 
     uint32_t v_width, v_height, v_dwidth, v_dheight;
     bool v_dwidth_set, v_dheight_set;
+    int v_crop[4];
     double v_frate;
     uint32_t colorspace;
 
@@ -526,6 +527,26 @@ static void parse_trackvideo(struct demuxer *demuxer, struct mkv_track *track,
         track->v_height = video->pixel_height;
         mp_msg(MSGT_DEMUX, MSGL_V, "[mkv] |   + Pixel height: %u\n",
                track->v_height);
+    }
+    if (video->n_pixel_crop_left) {
+        track->v_crop[0] = video->pixel_crop_left;
+        mp_msg(MSGT_DEMUX, MSGL_V, "[mkv] |   + Pixel crop left: %u\n",
+               track->v_crop[0]);
+    }
+    if (video->n_pixel_crop_top) {
+        track->v_crop[1] = video->pixel_crop_top;
+        mp_msg(MSGT_DEMUX, MSGL_V, "[mkv] |   + Pixel crop top: %u\n",
+               track->v_crop[1]);
+    }
+    if (video->n_pixel_crop_right) {
+        track->v_crop[2] = video->pixel_crop_right;
+        mp_msg(MSGT_DEMUX, MSGL_V, "[mkv] |   + Pixel crop right: %u\n",
+               track->v_crop[2]);
+    }
+    if (video->n_pixel_crop_bottom) {
+        track->v_crop[3] = video->pixel_crop_bottom;
+        mp_msg(MSGT_DEMUX, MSGL_V, "[mkv] |   + Pixel crop bottom: %u\n",
+               track->v_crop[3]);
     }
     if (video->n_colour_space && video->colour_space.len == 4) {
         uint8_t *d = (uint8_t *)&video->colour_space.start[0];
@@ -1253,6 +1274,8 @@ static int demux_mkv_open_video(demuxer_t *demuxer, mkv_track_t *track)
         sh_v->disp_w = track->v_dwidth;
         sh_v->disp_h = track->v_dheight;
     }
+    assert(sizeof(sh_v->crop) == sizeof(track->v_crop));
+    memcpy(sh_v->crop, track->v_crop, sizeof(sh_v->crop));
     mp_msg(MSGT_DEMUX, MSGL_V, "[mkv] Aspect: %f\n", sh_v->aspect);
 
     return 0;
