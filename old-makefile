@@ -55,6 +55,8 @@ SOURCES-$(COCOA)                += video/out/cocoa/view.m \
                                    osdep/ar/HIDRemote.m \
                                    osdep/path-macosx.m
 
+SOURCES-$(HAVE_POSIX_SELECT)    += osdep/poll_helper.c osdep/pipe-unix.c
+
 SOURCES-$(MPG123)               += audio/decode/ad_mpg123.c
 
 SOURCES-$(NEED_GETTIMEOFDAY)    += osdep/gettimeofday.c
@@ -205,6 +207,7 @@ SOURCES = audio/audio.c \
           input/event.c \
           input/input.c \
           input/keycodes.c \
+          input/slave_mode.c \
           misc/charset_conv.c \
           misc/ring.c \
           options/m_config.c \

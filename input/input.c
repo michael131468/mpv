@@ -195,7 +195,7 @@ static const m_option_t input_config[] = {
     OPT_PRINT("keylist", mp_print_key_list),
     OPT_PRINT("cmdlist", mp_print_cmd_list),
     OPT_STRING("js-dev", input.js_dev, CONF_GLOBAL),
-    OPT_STRING("file", input.in_file, CONF_GLOBAL),
+    //OPT_STRING("file", input.in_file, CONF_GLOBAL),
     OPT_FLAG("default-bindings", input.default_bindings, CONF_GLOBAL),
     OPT_FLAG("test", input.test, CONF_GLOBAL),
     { NULL, NULL, 0, 0, 0, 0, NULL}
@@ -1582,7 +1582,7 @@ struct input_ctx *mp_input_init(struct mpv_global *global)
     }
 #endif
 
-    if (input_conf->in_file) {
+    /*if (input_conf->in_file) {
         int mode = O_RDONLY;
 #ifndef __MINGW32__
         // Use RDWR for FIFOs to ensure they stay open over multiple accesses.
@@ -1599,7 +1599,7 @@ struct input_ctx *mp_input_init(struct mpv_global *global)
         else
             MP_ERR(ictx, "Can't open %s: %s\n", input_conf->in_file,
                    strerror(errno));
-    }
+    }*/
 
     return ictx;
 }

@@ -21,4 +21,6 @@ int mp_client_send_event(struct MPContext *mpctx, const char *client_name,
 struct mpv_handle *mp_new_client(struct mp_client_api *clients, const char *name);
 struct mp_log *mp_client_get_log(struct mpv_handle *ctx);
 
+struct MPContext *mp_client_get_mpctx(struct mpv_handle *ctx);
+
 #endif

@@ -50,6 +50,7 @@
 #include "common/playlist_parser.h"
 #include "options/options.h"
 #include "input/input.h"
+#include "input/slave_mode.h"
 
 #include "audio/decode/dec_audio.h"
 #include "audio/out/ao.h"
@@ -111,6 +112,20 @@ void mp_print_version(struct mp_log *log, int always)
            mpv_version, mpv_builddate);
     print_libav_versions(log, v);
     mp_msg(log, v, "\n");
+}
+
+static int slave_mode_main(int argc, char **argv)
+{
+    mpv_handle *h = mpv_create();
+    if (!h)
+        return 0x20;
+    struct MPContext *mpctx = mp_client_get_mpctx(h);
+    struct MPOpts *opts = mpctx->opts;
+    m_config_preparse_command_line(mpctx->mconfig, mpctx->global, argc, argv);
+    if (m_config_parse_mp_command_line(mpctx->mconfig, mpctx->playlist,
+                                       mpctx->global, argc, argv) < 0)
+        return 0x21;
+    return mp_run_slave_mode(h, opts->slave_fd);
 }
 
 static void shutdown_clients(struct MPContext *mpctx)
@@ -453,6 +468,13 @@ int mp_initialize(struct MPContext *mpctx)
     if (!mpctx->playlist->current)
         mpctx->playlist->current = mpctx->playlist->first;
 
+    if (opts->slave_proto == 1)
+        mp_start_slave_client(mpctx, "slave", opts->slave_fd);
+    if (opts->input_file && opts->input_file[0]) {
+        mp_start_slave_client(mpctx, "input-file",
+                              (char*[]){opts->input_file, NULL});
+    }
+
     return 0;
 }
 
@@ -472,7 +494,13 @@ int mpv_main(int argc, char *argv[])
     // Preparse the command line
     m_config_preparse_command_line(mpctx->mconfig, mpctx->global, argc, argv);
 
-    if (mpctx->opts->use_terminal && !terminal_initialized) {
+    if (opts->slave_proto == 2) {
+        // Undo everything, start over with client API defaults.
+        mp_destroy(mpctx);
+        return slave_mode_main(argc, argv);
+    }
+
+    if (opts->use_terminal && !terminal_initialized) {
         terminal_initialized = true;
         terminal_init();
     }

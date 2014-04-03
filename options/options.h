@@ -137,7 +137,10 @@ typedef struct MPOpts {
     char *heartbeat_cmd;
     float heartbeat_interval;
     int player_idle_mode;
-    int slave_mode;
+    int slave_mode; // old one
+    int slave_proto;
+    char *slave_fd[2];
+    char *input_file;
     int consolecontrols;
     struct m_rel_time play_start;
     struct m_rel_time play_end;

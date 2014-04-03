@@ -200,6 +200,14 @@ static const m_option_t screenshot_conf[] = {
     {0},
 };
 
+static const m_option_t slave_opts[] = {
+    OPT_CHOICE("proto", slave_proto, M_OPT_GLOBAL | M_OPT_FIXED,
+               ({"no", 0}, {"client", 1}, {"master", 2})),
+    OPT_STRING("in", slave_fd[0], M_OPT_GLOBAL | M_OPT_FIXED),
+    OPT_STRING("out", slave_fd[1], M_OPT_GLOBAL | M_OPT_FIXED),
+    {0}
+};
+
 extern const m_option_t lavc_decode_opts_conf[];
 extern const m_option_t ad_lavc_decode_opts_conf[];
 
@@ -614,6 +622,8 @@ const m_option_t mp_opts[] = {
     OPT_STRING("osd-status-msg", osd_status_msg, 0),
 
     OPT_FLAG("slave-broken", slave_mode, CONF_GLOBAL),
+    {"slave", (void *)slave_opts, CONF_TYPE_SUBCONFIG},
+    OPT_STRING("input-file", input_file, CONF_GLOBAL),
     OPT_FLAG("idle", player_idle_mode, M_OPT_GLOBAL),
     OPT_INTRANGE("key-fifo-size", input.key_fifo_size, CONF_GLOBAL, 2, 65000),
     OPT_FLAG("consolecontrols", consolecontrols, CONF_GLOBAL),
