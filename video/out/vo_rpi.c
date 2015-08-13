@@ -21,6 +21,9 @@
 #include <math.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+
 
 #include <bcm_host.h>
 #include <interface/mmal/mmal.h>
@@ -39,6 +42,10 @@
 #include "video/mp_image.h"
 #include "sub/osd.h"
 #include "sub/img_convert.h"
+
+#include "gl_common.h"
+#include "gl_utils.h"
+#include "gl_osd.h"
 
 // In theory, the number of RGBA subbitmaps the OSD code could give us is
 // unlimited; but in practice there will be rarely many elements.
@@ -88,7 +95,107 @@ struct priv {
 
     int display_nr;
     int layer;
+
+    struct GL *gl;
+
+    EGLDisplay egl_display;
+    EGLContext egl_context;
+    EGLSurface egl_surface;
+    // yep, the API keeps a pointer to it
+    EGL_DISPMANX_WINDOW_T egl_window;
+    struct gl_shader_cache *sc;
+    struct mpgl_osd *osd;
 };
+
+static void *get_proc_address(const GLubyte *name)
+{
+    void *p = eglGetProcAddress(name);
+    // It looks like eglGetProcAddress() should work even for builtin
+    // functions, but it doesn't work at least with RPI/Broadcom crap.
+    // (EGL 1.4, which current RPI firmware pretends to support, definitely
+    // is required to return non-extension functions.)
+    if (!p) {
+        void *h = dlopen("/opt/vc/lib/libGLESv2.so", RTLD_LAZY);
+        if (h) {
+            p = dlsym(h, name);
+            dlclose(h);
+        }
+    }
+    return p;
+}
+
+static EGLConfig select_fb_config_egl(struct vo *vo)
+{
+    struct priv *p = vo->priv;
+
+    EGLint attributes[] = {
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+        EGL_RED_SIZE, 8,
+        EGL_GREEN_SIZE, 8,
+        EGL_BLUE_SIZE, 8,
+        EGL_ALPHA_SIZE, 8,
+        EGL_DEPTH_SIZE, 0,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+        EGL_NONE
+    };
+
+    EGLint config_count;
+    EGLConfig config;
+
+    eglChooseConfig(p->egl_display, attributes, &config, 1, &config_count);
+
+    if (!config_count) {
+        MP_FATAL(vo, "Could find EGL configuration!\n");
+        return NULL;
+    }
+
+    return config;
+}
+
+static bool sc_config_window(struct vo *vo)
+{
+    struct priv *p = vo->priv;
+
+    p->egl_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    if (!eglInitialize(p->egl_display, NULL, NULL)) {
+        MP_FATAL(vo, "EGL failed to initialize.\n");
+        return false;
+    }
+
+    eglBindAPI(EGL_OPENGL_ES_API);
+
+    EGLConfig config = select_fb_config_egl(vo);
+    if (!config)
+        return false;
+
+    p->egl_window = (EGL_DISPMANX_WINDOW_T){.element = p->window, .width = p->w, .height = p->h};
+    p->egl_surface = eglCreateWindowSurface(p->egl_display, config, &p->egl_window, NULL);
+
+    if (p->egl_surface == EGL_NO_SURFACE) {
+        MP_FATAL(vo, "Could not create EGL surface!\n");
+        return false;
+    }
+
+    EGLint context_attributes[] = {
+        EGL_CONTEXT_CLIENT_VERSION, 2,
+        EGL_NONE
+    };
+    p->egl_context = eglCreateContext(p->egl_display, config,
+                                      EGL_NO_CONTEXT, context_attributes);
+
+    if (p->egl_context == EGL_NO_CONTEXT) {
+        MP_FATAL(vo, "Could not create EGL context!\n");
+        return false;
+    }
+
+    eglMakeCurrent(p->egl_display, p->egl_surface, p->egl_surface,
+                   p->egl_context);
+
+    const char *exts = eglQueryString(p->egl_display, EGL_EXTENSIONS);
+    mpgl_load_functions(p->gl, get_proc_address, exts, vo->log);
+
+    return true;
+}
 
 // Magic alignments (in pixels) expected by the MMAL internals.
 #define ALIGN_W 32
@@ -206,6 +313,7 @@ static void osd_draw_cb(void *ctx, struct sub_bitmaps *imgs)
     }
 }
 
+#if 0
 static void update_osd(struct vo *vo)
 {
     struct priv *p = vo->priv;
@@ -220,6 +328,42 @@ static void update_osd(struct vo *vo)
         struct osd_part *part = &p->osd_parts[x];
         if (!part->needed)
             wipe_osd_part(vo, part);
+    }
+}
+#endif
+
+#define GLSL(x) gl_sc_add(p->sc, #x "\n");
+#define GLSLF(...) gl_sc_addf(p->sc, __VA_ARGS__)
+
+static void update_osd(struct vo *vo)
+{
+    struct priv *p = vo->priv;
+
+    mpgl_osd_generate(p->osd, p->osd_res, p->osd_pts, 0, 0);
+
+    for (int n = 0; n < MAX_OSD_PARTS; n++) {
+        enum sub_bitmap_format fmt = mpgl_osd_get_part_format(p->osd, n);
+        if (!fmt)
+            continue;
+        gl_sc_uniform_sampler(p->sc, "osdtex", GL_TEXTURE_2D, 0);
+        switch (fmt) {
+        case SUBBITMAP_RGBA: {
+            GLSLF("// OSD (RGBA)\n");
+            GLSL(vec4 color = texture(osdtex, texcoord).bgra;)
+            break;
+        }
+        case SUBBITMAP_LIBASS: {
+            GLSLF("// OSD (libass)\n");
+            GLSL(vec4 color =
+                vec4(ass_color.rgb, ass_color.a * texture(osdtex, texcoord).r);)
+            break;
+        }
+        default:
+            abort();
+        }
+        gl_sc_set_vao(p->sc, mpgl_osd_get_vao(p->osd));
+        gl_sc_gen_shader_and_reset(p->sc);
+        mpgl_osd_draw_part(p->osd, p->w, -p->h, n);
     }
 }
 
@@ -275,7 +419,7 @@ static int update_display_size(struct vo *vo)
     VC_RECT_T dst = {.width = p->w, .height = p->h};
     VC_RECT_T src = {.width = 1 << 16, .height = 1 << 16};
     VC_DISPMANX_ALPHA_T alpha = {
-        .flags = DISPMANX_FLAGS_ALPHA_FIXED_ALL_PIXELS,
+        .flags = DISPMANX_FLAGS_ALPHA_FROM_SOURCE,
         .opacity = 0xFF,
     };
     p->window = vc_dispmanx_element_add(p->update, p->display, p->background_layer,
@@ -329,10 +473,13 @@ static void flip_page(struct vo *vo)
     p->next_image = NULL;
 
     // For OSD
+    /*
     if (!p->skip_osd) {
         vc_dispmanx_update_submit_sync(p->update);
         p->update = vc_dispmanx_update_start(10);
     }
+    */
+    eglSwapBuffers(p->egl_display, p->egl_surface);
     p->skip_osd = false;
 
     if (mpi) {
@@ -375,8 +522,12 @@ static void draw_frame(struct vo *vo, struct vo_frame *frame)
     // Redraw only if the OSD has meaningfully changed, which we assume it
     // hasn't when a frame is merely repeated for display sync.
     p->skip_osd = !frame->redraw && frame->repeat;
-    if (!p->skip_osd)
-        update_osd(vo);
+    //if (!p->skip_osd)
+
+
+    p->gl->ClearColor(0, 0, 0, 0);
+    p->gl->Clear(GL_COLOR_BUFFER_BIT);
+    update_osd(vo);
 
     p->display_synced = frame->display_synced;
 
@@ -639,8 +790,10 @@ static int preinit(struct vo *vo)
     struct priv *p = vo->priv;
 
     p->background_layer = p->layer;
-    p->video_layer = p->layer + 1;
+    p->video_layer = p->layer - 1;
     p->osd_layer = p->layer + 2;
+
+    p->gl = talloc_zero(vo, struct GL);
 
     bcm_host_init();
 
@@ -671,6 +824,20 @@ static int preinit(struct vo *vo)
     pthread_cond_init(&p->vsync_cond, NULL);
 
     vc_dispmanx_vsync_callback(p->display, vsync_callback, vo);
+
+    if (!sc_config_window(vo)) {
+        MP_FATAL(vo, "no GL\n");
+        goto fail;
+    }
+
+    p->gl->ActiveTexture(GL_TEXTURE0);
+    if (p->gl->mpgl_caps & MPGL_CAP_ROW_LENGTH)
+        p->gl->PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    p->gl->PixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+    p->sc = gl_sc_create(p->gl, vo->log, vo->global),
+
+    p->osd = mpgl_osd_init(p->gl, vo->log, vo->osd);
 
     return 0;
 
