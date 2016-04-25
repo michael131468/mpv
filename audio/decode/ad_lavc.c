@@ -85,7 +85,8 @@ static int init(struct dec_audio *da, const char *decoder)
     struct priv *ctx = talloc_zero(NULL, struct priv);
     da->priv = ctx;
 
-    ctx->codec_timebase = (AVRational){0};
+    if (strstr(decoder, "_mf"))
+        ctx->codec_timebase = (AVRational){1, 10000000};
 
     ctx->force_channel_map = c->force_channels;
 
@@ -134,6 +135,9 @@ static int init(struct dec_audio *da, const char *decoder)
     mp_set_lav_codec_headers(lavc_context, c);
 
     mp_set_avcodec_threads(da->log, lavc_context, opts->threads);
+
+    if (ctx->codec_timebase.num)
+        lavc_context->time_base = ctx->codec_timebase;
 
     /* open it */
     if (avcodec_open2(lavc_context, lavc_codec, NULL) < 0) {

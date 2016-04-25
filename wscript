@@ -876,7 +876,14 @@ hwaccel_features = [
         'desc': 'GCC SSE4 intrinsics for GPU memcpy',
         'deps_any': [ 'd3d-hwaccel', 'vaapi-hwaccel' ],
         'func': check_cc(fragment=load_fragment('sse.c')),
-    }
+    }, {
+        'name': 'mf-hwaccel',
+        'desc': 'MediaFoundation hwaccel decoder',
+        'deps': [ 'win32' ],
+        'func': check_statement('libavutil/hwcontext_mf.h',
+                                'AVMFDeviceContext *d',
+                                use='libav'),
+    },
 ]
 
 radio_and_tv_features = [
