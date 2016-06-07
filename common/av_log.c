@@ -147,6 +147,21 @@ static void mp_msg_av_log_callback(void *ptr, int level, const char *fmt,
     pthread_mutex_unlock(&log_lock);
 }
 
+// Escape STA vs. MTA misery on Windows.
+static void *init_thread(void *p)
+{
+    avcodec_register_all();
+    av_register_all();
+    avformat_network_init();
+    avfilter_register_all();
+
+#if HAVE_LIBAVDEVICE
+    avdevice_register_all();
+#endif
+
+    return NULL;
+}
+
 void init_libav(struct mpv_global *global)
 {
     pthread_mutex_lock(&log_lock);
@@ -160,14 +175,9 @@ void init_libav(struct mpv_global *global)
     }
     pthread_mutex_unlock(&log_lock);
 
-    avcodec_register_all();
-    av_register_all();
-    avformat_network_init();
-    avfilter_register_all();
-
-#if HAVE_LIBAVDEVICE
-    avdevice_register_all();
-#endif
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, init_thread, NULL) == 0)
+        pthread_join(thread, NULL);
 }
 
 void uninit_libav(struct mpv_global *global)
