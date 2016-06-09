@@ -23,6 +23,7 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
+#include "angle_common.h"
 #include "angle_dynamic.h"
 
 #include "common/common.h"
