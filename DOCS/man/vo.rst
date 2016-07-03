@@ -1324,6 +1324,9 @@ Available video output drivers are:
         Enabled by default. If disabled with ``no``, no OSD layer is created.
         This also means there will be no subtitles rendered.
 
+``aml`` (Amlogic)
+  Native video output on Amlogic chips using amcodec API.
+
 ``drm`` (Direct Rendering Manager)
     Video output driver using Kernel Mode Setting / Direct Rendering Manager.
     Should be used when one doesn't want to install full-blown graphical

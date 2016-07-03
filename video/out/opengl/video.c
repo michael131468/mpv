@@ -43,6 +43,7 @@
 #include "video/out/aspect.h"
 #include "video/out/dither.h"
 #include "video/out/vo.h"
+#include "time.h"
 
 // Maximal number of saved textures (for user script purposes)
 #define MAX_TEXTURE_HOOKS 16
@@ -488,6 +489,17 @@ static void gl_video_setup_hooks(struct gl_video *p);
 #define GLSL(x) gl_sc_add(p->sc, #x "\n");
 #define GLSLF(...) gl_sc_addf(p->sc, __VA_ARGS__)
 #define GLSLHF(...) gl_sc_haddf(p->sc, __VA_ARGS__)
+
+void printtime(struct gl_video *p, char *text)
+{
+  static double last_time;
+  struct timespec time;
+  double ftime;
+  clock_gettime(CLOCK_REALTIME, &time);
+  ftime = time.tv_sec + (time.tv_nsec / 1000000000.0);
+  MP_VERBOSE(p,"time at %s is %f (diff=%f)\n", text, ftime, ftime-last_time);
+  last_time = ftime;
+}
 
 static struct bstr load_cached_file(struct gl_video *p, const char *path)
 {
@@ -2671,6 +2683,7 @@ static void timer_dbg(struct gl_video *p, const char *name, struct gl_timer *t)
 // (fbo==0 makes BindFramebuffer select the screen backbuffer)
 void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame, int fbo)
 {
+    //printtime(p,"gl_video_render_frame start");
     GL *gl = p->gl;
     struct video_image *vimg = &p->image;
 
@@ -2783,6 +2796,7 @@ done:
     timer_dbg(p, "upload", p->upload_timer);
     timer_dbg(p, "render", p->render_timer);
     timer_dbg(p, "present", p->present_timer);
+    //printtime(p,"gl_video_render_frame end");
 }
 
 // vp_w/vp_h is the implicit size of the target framebuffer.

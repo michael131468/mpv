@@ -135,12 +135,21 @@ extern const struct vd_lavc_hwdec mp_vd_lavc_d3d11va;
 extern const struct vd_lavc_hwdec mp_vd_lavc_d3d11va_copy;
 extern const struct vd_lavc_hwdec mp_vd_lavc_mf;
 extern const struct vd_lavc_hwdec mp_vd_lavc_mf_copy;
+//extern const struct vd_lavc_hwdec mp_vd_lavc_aml;
 
 #if HAVE_RPI
 static const struct vd_lavc_hwdec mp_vd_lavc_rpi = {
     .type = HWDEC_RPI,
     .lavc_suffix = "_mmal",
     .image_format = IMGFMT_MMAL,
+};
+#endif
+
+#if HAVE_AML
+static const struct vd_lavc_hwdec mp_vd_lavc_aml = {
+    .type = HWDEC_AML,
+    .lavc_suffix = "_aml",
+    .image_format = IMGFMT_AML,
 };
 #endif
 
@@ -179,6 +188,9 @@ static const struct vd_lavc_hwdec *const hwdec_list[] = {
 #if HAVE_MF_HWACCEL
     &mp_vd_lavc_mf,
     &mp_vd_lavc_mf_copy,
+#endif
+#if HAVE_AML
+    &mp_vd_lavc_aml,
 #endif
     NULL
 };
@@ -456,7 +468,7 @@ static void init_avctx(struct dec_video *vd, const char *decoder,
         return;
 
     ctx->codec_timebase = (AVRational){0};
-    if (strstr(decoder, "_mmal") || strstr(decoder, "_mediacodec") || strstr(decoder, "_mf"))
+    if (strstr(decoder, "_aml") || strstr(decoder, "_mmal") || strstr(decoder, "_mediacodec") || strstr(decoder, "_mf"))
         ctx->codec_timebase = (AVRational){1, 1000000};
 
     ctx->pix_fmt = AV_PIX_FMT_NONE;
