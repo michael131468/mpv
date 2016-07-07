@@ -64,10 +64,12 @@ static void unmap_frame(struct gl_hwdec *hw);
 struct priv {
     struct mp_log *log;
     struct mp_aml_ctx *ctx;
-    GLuint gl_textures[NUM_PLANES];
+    //GLuint gl_textures[NUM_PLANES];
+    GLuint gl_texture;
 
     AMLBuffer *current_buffer;
-    EGLImageKHR images[NUM_PLANES];
+    //EGLImageKHR images[NUM_PLANES];
+    EGLImageKHR image;
     int current_fd;
     EGLImageKHR (EGLAPIENTRY *CreateImageKHR)(EGLDisplay, EGLContext,
                                               EGLenum, EGLClientBuffer,
@@ -82,24 +84,32 @@ static void destroy_textures(struct gl_hwdec *hw)
   struct priv *p = hw->priv;
   GL *gl = hw->gl;
 
-  for (int i=0; i < NUM_PLANES; i++)
-  {
-    if (p->gl_textures[i])
-    {
-      gl->DeleteTextures(1, &p->gl_textures[i]);
-      p->gl_textures[i] = 0;
-    }
+  if (p->gl_texture)
+     gl->DeleteTextures(1, &p->gl_texture);
+  p->gl_texture = 0;
 
-    if (p->images[i])
-      p->DestroyImageKHR(eglGetCurrentDisplay(), p->images[i]);
-    p->images[i] = 0;
+  if (p->image)
+    p->DestroyImageKHR(eglGetCurrentDisplay(), p->image);
+  p->image = 0;
 
-  }
+
+  //  for (int i=0; i < NUM_PLANES; i++)
+  //  {
+  //    if (p->gl_textures[i])
+  //    {
+  //      gl->DeleteTextures(1, &p->gl_textures[i]);
+  //      p->gl_textures[i] = 0;
+  //    }
+
+  //    if (p->images[i])
+  //      p->DestroyImageKHR(eglGetCurrentDisplay(), p->images[i]);
+  //    p->images[i] = 0;
+
+  //  }
 }
 
 static void destroy(struct gl_hwdec *hw)
 {
-    struct priv *p = hw->priv;
     destroy_textures(hw);
 }
 
@@ -124,11 +134,9 @@ static int create(struct gl_hwdec *hw)
       return -1;
     }
 
-    for (int i=0; i < NUM_PLANES; i++)
-    {
-      p->gl_textures[i] = 0;
-      p->images[i] = 0;
-    }
+    p->gl_texture = 0;
+    p->image = 0;
+    p->current_buffer = NULL;
 
     p->ctx = talloc_ptrtype(NULL, p->ctx);
     *p->ctx = (struct mp_aml_ctx) {
@@ -185,8 +193,8 @@ static void unmap_frame(struct gl_hwdec *hw)
 //    p->DestroyImageKHR(eglGetCurrentDisplay(), p->image);
 //  p->image = 0;
 
-  if (p->current_buffer)
-    p->current_buffer->requeue=1;
+//  if (p->current_buffer)
+//    p->current_buffer->requeue=1;
 
   destroy_textures(hw);
 }
@@ -202,75 +210,59 @@ static int map_frame(struct gl_hwdec *hw, struct mp_image *hw_image,
                pbuffer->fd_handle, pbuffer->fpts, hw_image->w, hw_image->h, hw_image->stride[0], pbuffer->index);
 
     //destroy_textures(hw);
+
+    // If we have a new buffer, make sure we requeue the previous one
+//    if ((p->current_buffer) && (p->current_buffer != pbuffer))
+//    {
+//      MP_VERBOSE(p, "Flag Buffer #%d for requeue", p->current_buffer->index);
+//      p->current_buffer->requeue = 1;
+//    }
+
     GLenum gltarget = GL_TEXTURE_EXTERNAL_OES;
 
-    for (int i=0; i < NUM_PLANES; i++)
+    gl->GenTextures(1, &p->gl_texture);
+    gl->BindTexture(gltarget, p->gl_texture);
+    gl->TexParameteri(gltarget, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl->TexParameteri(gltarget, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl->TexParameteri(gltarget, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl->TexParameteri(gltarget, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl->BindTexture(gltarget, 0);
+
+    if (pbuffer->fd_handle)
     {
-      gl->GenTextures(1, &p->gl_textures[i]);
-      gl->BindTexture(gltarget, p->gl_textures[i]);
-      gl->TexParameteri(gltarget, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-      gl->TexParameteri(gltarget, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-      gl->TexParameteri(gltarget, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-      gl->TexParameteri(gltarget, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-      gl->BindTexture(gltarget, 0);
+      const EGLint img_attrs[] = {
+          EGL_WIDTH, pbuffer->width,
+          EGL_HEIGHT, pbuffer->height,
+          EGL_LINUX_DRM_FOURCC_EXT, DRM_FORMAT_NV21,
+          EGL_DMA_BUF_PLANE0_FD_EXT,	pbuffer->fd_handle,
+          EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
+          EGL_DMA_BUF_PLANE0_PITCH_EXT, pbuffer->stride,
+          EGL_DMA_BUF_PLANE1_FD_EXT,	pbuffer->fd_handle,
+          EGL_DMA_BUF_PLANE1_OFFSET_EXT, pbuffer->stride * pbuffer->height,
+          EGL_DMA_BUF_PLANE1_PITCH_EXT, pbuffer->stride,
+          EGL_YUV_COLOR_SPACE_HINT_EXT, EGL_ITU_REC709_EXT,
+          EGL_SAMPLE_RANGE_HINT_EXT, EGL_YUV_FULL_RANGE_EXT,
+          EGL_NONE
+        };
 
-      if (pbuffer->fd_handle)
+      p->image = p->CreateImageKHR(eglGetCurrentDisplay(), EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, 0, img_attrs);
+      if (!p->image)
       {
-//        const EGLint img_attrs[] = {
-//            EGL_WIDTH, i==0 ? pbuffer->width : pbuffer->width  ,
-//            EGL_HEIGHT, i==0 ? pbuffer->height : pbuffer->height ,
-//            EGL_LINUX_DRM_FOURCC_EXT, i==0 ? DRM_FORMAT_RGB332 : fourcc_code('G', 'R', '8', '8'),
-//            EGL_DMA_BUF_PLANE0_FD_EXT,	pbuffer->fd_handle,
-//            EGL_DMA_BUF_PLANE0_OFFSET_EXT, i==0 ? 0 : hw_image->h * pbuffer->stride,
-//            EGL_DMA_BUF_PLANE0_PITCH_EXT, i==0 ? pbuffer->stride : pbuffer->stride / 2,
-////            EGL_DMA_BUF_PLANE1_FD_EXT,	pbuffer->fd_handle,
-////            EGL_DMA_BUF_PLANE1_OFFSET_EXT, pbuffer->stride * pbuffer->height,
-////            EGL_DMA_BUF_PLANE1_PITCH_EXT, pbuffer->stride,
-////            EGL_YUV_COLOR_SPACE_HINT_EXT, EGL_ITU_REC709_EXT,
-////            EGL_SAMPLE_RANGE_HINT_EXT, EGL_YUV_FULL_RANGE_EXT,
-//            EGL_NONE
-//        };
-
-        const EGLint img_attrs[] = {
-            EGL_WIDTH, pbuffer->width,
-            EGL_HEIGHT, pbuffer->height,
-            EGL_LINUX_DRM_FOURCC_EXT, DRM_FORMAT_NV12,
-            EGL_DMA_BUF_PLANE0_FD_EXT,	pbuffer->fd_handle,
-            EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
-            EGL_DMA_BUF_PLANE0_PITCH_EXT, pbuffer->stride,
-            EGL_DMA_BUF_PLANE1_FD_EXT,	pbuffer->fd_handle,
-            EGL_DMA_BUF_PLANE1_OFFSET_EXT, pbuffer->stride * pbuffer->height,
-            EGL_DMA_BUF_PLANE1_PITCH_EXT, pbuffer->stride,
-            EGL_YUV_COLOR_SPACE_HINT_EXT, EGL_ITU_REC709_EXT,
-            EGL_SAMPLE_RANGE_HINT_EXT, EGL_YUV_FULL_RANGE_EXT,
-            EGL_NONE
-          };
-
-        p->images[i] = p->CreateImageKHR(eglGetCurrentDisplay(), EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, 0, img_attrs);
-        if (!p->images[i])
-        {
-          MP_ERR(p,"CreateImageKHR error 0x%x (plane %d)\n", eglGetError(), i);
-          goto err;
-        }
-
-        gl->BindTexture(GL_TEXTURE_EXTERNAL_OES, p->gl_textures[i]);
-        p->EGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, p->images[i]);
-        p->current_fd = pbuffer->fd_handle;
-        p->current_buffer = pbuffer;
+        MP_ERR(p,"CreateImageKHR error 0x%x\n", eglGetError());
+        goto err;
       }
-  }
+
+      gl->BindTexture(GL_TEXTURE_EXTERNAL_OES, p->gl_texture);
+      p->EGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, p->image);
+      p->current_fd = pbuffer->fd_handle;
+      p->current_buffer = pbuffer;
+    }
+
     out_frame->planes[0] = (struct gl_hwdec_plane){
-        .gl_texture = p->gl_textures[0],
+        .gl_texture = p->gl_texture,
         .gl_target = gltarget,
         .tex_w =  hw_image->w,
         .tex_h = hw_image->h,
-    };
-
-    out_frame->planes[1] = (struct gl_hwdec_plane){
-        .gl_texture = p->gl_textures[1],
-        .gl_target = gltarget,
-        .tex_w =  hw_image->w,
-        .tex_h = hw_image->h/2,
     };
 
     gl->BindTexture(GL_TEXTURE_2D, 0);
