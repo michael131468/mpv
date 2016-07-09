@@ -24,6 +24,7 @@
 #include <drm/drm_fourcc.h>
 #include "video/img_fourcc.h"
 #include <libavcodec/aml.h>
+#include <libavutil/buffer.h>
 
 #include "hwdec.h"
 #include "utils.h"
@@ -56,21 +57,17 @@
 #define EGL_YUV_CHROMA_SITING_0_EXT    0x3284
 #define EGL_YUV_CHROMA_SITING_0_5_EXT  0x3285
 
-#define NUM_PLANES  1
-
 static int reinit(struct gl_hwdec *hw, struct mp_image_params *params);
 static void unmap_frame(struct gl_hwdec *hw);
 
 struct priv {
     struct mp_log *log;
     struct mp_aml_ctx *ctx;
-    //GLuint gl_textures[NUM_PLANES];
     GLuint gl_texture;
+    EGLImageKHR image;
 
     AMLBuffer *current_buffer;
-    //EGLImageKHR images[NUM_PLANES];
-    EGLImageKHR image;
-    int current_fd;
+
     EGLImageKHR (EGLAPIENTRY *CreateImageKHR)(EGLDisplay, EGLContext,
                                               EGLenum, EGLClientBuffer,
                                               const EGLint *);
@@ -91,25 +88,12 @@ static void destroy_textures(struct gl_hwdec *hw)
   if (p->image)
     p->DestroyImageKHR(eglGetCurrentDisplay(), p->image);
   p->image = 0;
-
-
-  //  for (int i=0; i < NUM_PLANES; i++)
-  //  {
-  //    if (p->gl_textures[i])
-  //    {
-  //      gl->DeleteTextures(1, &p->gl_textures[i]);
-  //      p->gl_textures[i] = 0;
-  //    }
-
-  //    if (p->images[i])
-  //      p->DestroyImageKHR(eglGetCurrentDisplay(), p->images[i]);
-  //    p->images[i] = 0;
-
-  //  }
-}
+ }
 
 static void destroy(struct gl_hwdec *hw)
 {
+  struct priv *p = hw->priv;
+  MP_VERBOSE(p, "Destroying renderer\n");
     destroy_textures(hw);
 }
 
@@ -187,15 +171,8 @@ static int reinit(struct gl_hwdec *hw, struct mp_image_params *params)
 static void unmap_frame(struct gl_hwdec *hw)
 {
   struct priv *p = hw->priv;
-
-  MP_VERBOSE(p, "unmap_frame called for fd=%d\n", p->current_fd);
-//  if (p->image)
-//    p->DestroyImageKHR(eglGetCurrentDisplay(), p->image);
-//  p->image = 0;
-
 //  if (p->current_buffer)
-//    p->current_buffer->requeue=1;
-
+//    MP_VERBOSE(p, "unmap_frame called for fd=%d\n", p->current_buffer->index);
   destroy_textures(hw);
 }
 
@@ -206,17 +183,12 @@ static int map_frame(struct gl_hwdec *hw, struct mp_image *hw_image,
     GL *gl = hw->gl;
     AMLBuffer *pbuffer = (AMLBuffer*)hw_image->planes[0];
 
-    MP_VERBOSE(p, "map_frame called with dmabuf fd=%d, pts=%f, (w=%d, h=%d, stride=%d, index=%d)\n",
-               pbuffer->fd_handle, pbuffer->fpts, hw_image->w, hw_image->h, hw_image->stride[0], pbuffer->index);
+//    MP_VERBOSE(p, "map_frame called with dmabuf fd=%d, pts=%f, (w=%d, h=%d, stride=%d, index=%d, refcount=%d)\n",
+//               pbuffer->fd_handle, pbuffer->fpts, hw_image->w, hw_image->h, hw_image->stride[0], pbuffer->index, av_buffer_get_ref_count(hw_image->bufs[0]));
+
+    MP_VERBOSE(p, "MPV is drawing buffer #%d\n", pbuffer->index);
 
     //destroy_textures(hw);
-
-    // If we have a new buffer, make sure we requeue the previous one
-//    if ((p->current_buffer) && (p->current_buffer != pbuffer))
-//    {
-//      MP_VERBOSE(p, "Flag Buffer #%d for requeue", p->current_buffer->index);
-//      p->current_buffer->requeue = 1;
-//    }
 
     GLenum gltarget = GL_TEXTURE_EXTERNAL_OES;
 
@@ -254,7 +226,6 @@ static int map_frame(struct gl_hwdec *hw, struct mp_image *hw_image,
 
       gl->BindTexture(GL_TEXTURE_EXTERNAL_OES, p->gl_texture);
       p->EGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, p->image);
-      p->current_fd = pbuffer->fd_handle;
       p->current_buffer = pbuffer;
     }
 
