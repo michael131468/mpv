@@ -26,6 +26,12 @@
 #include <libavcodec/aml.h>
 #include <libavutil/buffer.h>
 
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+
 #include "hwdec.h"
 #include "utils.h"
 #include "video/aml.h"
@@ -57,6 +63,8 @@
 #define EGL_YUV_CHROMA_SITING_0_EXT    0x3284
 #define EGL_YUV_CHROMA_SITING_0_5_EXT  0x3285
 
+#define FBIO_WAITFORVSYNC       _IOW('F', 0x20, __u32)
+
 static int reinit(struct gl_hwdec *hw, struct mp_image_params *params);
 static void unmap_frame(struct gl_hwdec *hw);
 
@@ -65,6 +73,9 @@ struct priv {
     struct mp_aml_ctx *ctx;
     GLuint gl_texture;
     EGLImageKHR image;
+
+    GLuint gl_textures[AML_BUFFER_COUNT];
+    EGLImageKHR images[AML_BUFFER_COUNT];
 
     AMLBuffer *current_buffer;
 
@@ -122,6 +133,12 @@ static int create(struct gl_hwdec *hw)
     p->image = 0;
     p->current_buffer = NULL;
 
+    for (int i=0; i < AML_BUFFER_COUNT; i++)
+    {
+      p->gl_textures[i] = 0;
+      p->images[i] = 0;
+    }
+
     p->ctx = talloc_ptrtype(NULL, p->ctx);
     *p->ctx = (struct mp_aml_ctx) {
         .log = hw->log,
@@ -170,28 +187,59 @@ static int reinit(struct gl_hwdec *hw, struct mp_image_params *params)
 
 static void unmap_frame(struct gl_hwdec *hw)
 {
-  struct priv *p = hw->priv;
+//  int fd = open("/dev/fb0", O_RDWR);
+//  if (fd)
+//  {
+//    ioctl(fd, FBIO_WAITFORVSYNC, 0);
+//    close(fd);
+//  }
+
+//  struct priv *p = hw->priv;
+//  GL *gl = hw->gl;
+//  gl->Finish();
 //  if (p->current_buffer)
 //    MP_VERBOSE(p, "unmap_frame called for fd=%d\n", p->current_buffer->index);
-  destroy_textures(hw);
+  //destroy_textures(hw);
 }
+
+#define USE_V4L 1
+#define USE_VFM 0
+#define MULTI_TEXTURE 0
 
 static int map_frame(struct gl_hwdec *hw, struct mp_image *hw_image,
                      struct gl_hwdec_frame *out_frame)
 {
     struct priv *p = hw->priv;
     GL *gl = hw->gl;
+
+#if USE_V4L
     AMLBuffer *pbuffer = (AMLBuffer*)hw_image->planes[0];
+    MP_VERBOSE(p, "MPV is drawing buffer #%d\n", pbuffer->index);
+#endif
+
+#if USE_VFM
+    MP_VERBOSE(p, "MPV is drawing buffer FD #%d (%d x %d, s:%d)\n", (int)hw_image->planes[0], hw_image->w, hw_image->h, hw_image->stride[0]);
+#endif
 
 //    MP_VERBOSE(p, "map_frame called with dmabuf fd=%d, pts=%f, (w=%d, h=%d, stride=%d, index=%d, refcount=%d)\n",
 //               pbuffer->fd_handle, pbuffer->fpts, hw_image->w, hw_image->h, hw_image->stride[0], pbuffer->index, av_buffer_get_ref_count(hw_image->bufs[0]));
 
-    MP_VERBOSE(p, "MPV is drawing buffer #%d\n", pbuffer->index);
-
-    //destroy_textures(hw);
+    destroy_textures(hw);
 
     GLenum gltarget = GL_TEXTURE_EXTERNAL_OES;
 
+#if MULTI_TEXTURE
+    if (p->gl_textures[pbuffer->index] == 0)
+    {
+      gl->GenTextures(1, &p->gl_textures[pbuffer->index]);
+      gl->BindTexture(gltarget, p->gl_textures[pbuffer->index]);
+      gl->TexParameteri(gltarget, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      gl->TexParameteri(gltarget, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      gl->TexParameteri(gltarget, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      gl->TexParameteri(gltarget, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      gl->BindTexture(gltarget, 0);
+    }
+#else
     gl->GenTextures(1, &p->gl_texture);
     gl->BindTexture(gltarget, p->gl_texture);
     gl->TexParameteri(gltarget, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -199,7 +247,9 @@ static int map_frame(struct gl_hwdec *hw, struct mp_image *hw_image,
     gl->TexParameteri(gltarget, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gl->TexParameteri(gltarget, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     gl->BindTexture(gltarget, 0);
+#endif
 
+#if USE_V4L
     if (pbuffer->fd_handle)
     {
       const EGLint img_attrs[] = {
@@ -216,7 +266,41 @@ static int map_frame(struct gl_hwdec *hw, struct mp_image *hw_image,
           EGL_SAMPLE_RANGE_HINT_EXT, EGL_YUV_FULL_RANGE_EXT,
           EGL_NONE
         };
+#endif
 
+#if USE_VFM
+      if (hw_image->planes[0])
+      {
+      const EGLint img_attrs[] = {
+          EGL_WIDTH, hw_image->w,
+          EGL_HEIGHT, hw_image->h,
+          EGL_LINUX_DRM_FOURCC_EXT, DRM_FORMAT_NV21,
+          EGL_DMA_BUF_PLANE0_FD_EXT,	(int)hw_image->planes[0],
+          EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
+          EGL_DMA_BUF_PLANE0_PITCH_EXT, hw_image->stride[0],
+          EGL_DMA_BUF_PLANE1_FD_EXT,	(int)hw_image->planes[0],
+          EGL_DMA_BUF_PLANE1_OFFSET_EXT, hw_image->stride[0] * hw_image->h,
+          EGL_DMA_BUF_PLANE1_PITCH_EXT, hw_image->stride[0],
+          EGL_YUV_COLOR_SPACE_HINT_EXT, EGL_ITU_REC709_EXT,
+          EGL_SAMPLE_RANGE_HINT_EXT, EGL_YUV_FULL_RANGE_EXT,
+          EGL_NONE
+        };
+#endif
+
+#if MULTI_TEXTURE
+      if (p->images[pbuffer->index] == 0)
+      {
+        p->images[pbuffer->index] = p->CreateImageKHR(eglGetCurrentDisplay(), EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, 0, img_attrs);
+        if (!p->images[pbuffer->index])
+        {
+          MP_ERR(p,"CreateImageKHR error 0x%x\n", eglGetError());
+          goto err;
+        }
+
+        gl->BindTexture(GL_TEXTURE_EXTERNAL_OES, p->gl_textures[pbuffer->index]);
+        p->EGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, p->images[pbuffer->index]);
+      }
+#else
       p->image = p->CreateImageKHR(eglGetCurrentDisplay(), EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, 0, img_attrs);
       if (!p->image)
       {
@@ -226,15 +310,28 @@ static int map_frame(struct gl_hwdec *hw, struct mp_image *hw_image,
 
       gl->BindTexture(GL_TEXTURE_EXTERNAL_OES, p->gl_texture);
       p->EGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, p->image);
+#endif
+
+#if USE_V4L
       p->current_buffer = pbuffer;
+#endif
     }
 
+#if MULTI_TEXTURE
+     out_frame->planes[0] = (struct gl_hwdec_plane){
+          .gl_texture = p->gl_textures[pbuffer->index],
+          .gl_target = gltarget,
+          .tex_w =  hw_image->w,
+          .tex_h = hw_image->h,
+      };
+#else
     out_frame->planes[0] = (struct gl_hwdec_plane){
         .gl_texture = p->gl_texture,
         .gl_target = gltarget,
         .tex_w =  hw_image->w,
         .tex_h = hw_image->h,
     };
+#endif
 
     gl->BindTexture(GL_TEXTURE_2D, 0);
 
