@@ -199,7 +199,7 @@ static void unmap_frame(struct gl_hwdec *hw)
 //  gl->Finish();
 //  if (p->current_buffer)
 //    MP_VERBOSE(p, "unmap_frame called for fd=%d\n", p->current_buffer->index);
-  //destroy_textures(hw);
+  destroy_textures(hw);
 }
 
 #define USE_V4L 1
@@ -211,6 +211,8 @@ static int map_frame(struct gl_hwdec *hw, struct mp_image *hw_image,
 {
     struct priv *p = hw->priv;
     GL *gl = hw->gl;
+
+    return 0;
 
 #if USE_V4L
     AMLBuffer *pbuffer = (AMLBuffer*)hw_image->planes[0];
@@ -224,7 +226,7 @@ static int map_frame(struct gl_hwdec *hw, struct mp_image *hw_image,
 //    MP_VERBOSE(p, "map_frame called with dmabuf fd=%d, pts=%f, (w=%d, h=%d, stride=%d, index=%d, refcount=%d)\n",
 //               pbuffer->fd_handle, pbuffer->fpts, hw_image->w, hw_image->h, hw_image->stride[0], pbuffer->index, av_buffer_get_ref_count(hw_image->bufs[0]));
 
-    destroy_textures(hw);
+    //destroy_textures(hw);
 
     GLenum gltarget = GL_TEXTURE_EXTERNAL_OES;
 

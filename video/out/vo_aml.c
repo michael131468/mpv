@@ -25,6 +25,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 #include <amcodec/codec.h>
 #include <amcodec/amports/amstream.h>
@@ -38,8 +39,30 @@
 #define TRICKMODE_I     0x01
 #define TRICKMODE_FFFB  0x02
 
+// IOCTL defines
+#define VFM_GRABBER_GET_FRAME   _IOWR('V', 0x01, vfm_grabber_frame)
+#define VFM_GRABBER_GET_INFO    _IOWR('V', 0x02, vfm_grabber_info)
+#define VFM_GRABBER_PUT_FRAME   _IOWR('V', 0x03, vfm_grabber_frame)
+
+#define _A_M  'S'
+#define AMSTREAM_IOC_SET_FREERUN_PTS  _IOW((_A_M), 0x5c, int)
+
+#define VFM_DEVICE_NAME     "/dev/vfm_grabber"
+#define AMVIDEO_DEVICE_NAME "/dev/video10"
+
+typedef struct
+{
+  int dma_fd;
+  int width;
+  int height;
+  int stride;
+  void *priv;
+} vfm_grabber_frame;
+
 typedef struct priv {
    double mpv_start_pts;
+   int vfm_fd;
+   int amv_fd;
 } aml_private;
 
 typedef struct
@@ -100,6 +123,7 @@ static int64_t amlsysfs_read_int(struct vo *vo, const char *path, int base)
 
 static int query_format(struct vo *vo, int format)
 {
+  MP_VERBOSE(vo, "query_format %d / %d)\n", format, IMGFMT_AML);
     return (format == IMGFMT_AML);
 }
 
@@ -108,11 +132,57 @@ static void flip_page(struct vo *vo)
   //MP_VERBOSE(vo, "flip_page\n");
 }
 
+#define USE_VFM 0
+#define USE_AMV 1
+
 static void draw_frame(struct vo *vo, struct vo_frame *frame)
 {
   aml_private *priv = (aml_private*)vo->priv;
+  int ret;
 
+#if USE_VFM
+  vfm_grabber_frame *vfm_frame;
 
+  MP_VERBOSE(vo, "draw_frame called\n");
+  if (!frame->current)
+    return;
+
+  vfm_frame = (vfm_grabber_frame *)frame->current->planes[0];
+
+  MP_VERBOSE(vo, "draw_frame called on %dx%d image\n", vfm_frame->width, vfm_frame->height);
+  if (priv->vfm_fd)
+  {
+    ret = ioctl(priv->vfm_fd, VFM_GRABBER_PUT_FRAME, vfm_frame);
+    if (ret > 0)
+    {
+      MP_ERR(vo, "VFM_GRABBER_PUT_FRAME ictl failed (code=%d)\n", ret);
+      return;
+     }
+  }
+  MP_VERBOSE(vo, "draw_frame\n");
+#endif
+
+#if USE_AMV
+  if (!frame->current)
+    return;
+
+   int current = amlsysfs_read_int(vo, "/sys/module/amvideo/parameters/freerun_frameid", 10);
+   MP_VERBOSE(vo, "draw_frame id=%d/%d\n", frame->current->planes[0], current);
+   amlsysfs_write_int(vo,"/sys/module/amvideo/parameters/freerun_frameid", frame->current->planes[0]);
+
+//  if (priv->amv_fd)
+//  {
+//    int pts = 90000;
+//    ret = ioctl(priv->amv_fd, AMSTREAM_IOC_SET_FREERUN_PTS, pts);
+//    if (ret > 0)
+//    {
+//      MP_ERR(vo, "AMSTREAM_IOC_SET_FREERUN_PTS ictl failed (code=%d)\n", ret);
+//      return;
+//     }
+//  }
+  MP_VERBOSE(vo, "draw_frame\n");
+#endif
+  return;
 //  // do what we need on first required frame
 //  if (!priv->mpv_start_pts)
 //  {
@@ -259,6 +329,7 @@ static int control(struct vo *vo, uint32_t request, void *data)
 
 static void uninit(struct vo *vo)
 {
+  aml_private *priv = (aml_private*)vo->priv;
   // clear framebuffer
 //  amlsysfs_write_int(vo, "/sys/class/graphics/fb1/blank", 0);
 //  amlsysfs_write_int(vo, "/sys/class/graphics/fb0/blank", 1);
@@ -268,6 +339,21 @@ static void uninit(struct vo *vo)
 
   // disable video output
   amlsysfs_write_int(vo, "/sys/class/video/disable_video", 1);
+
+#if USE_VFM
+  if (priv->vfm_fd)
+  {
+    close(priv->vfm_fd);
+  }
+#endif
+
+#if USE_AMV
+  if (priv->amv_fd)
+  {
+    close(priv->amv_fd);
+  }
+#endif
+
 }
 
 static int preinit(struct vo *vo)
@@ -287,8 +373,9 @@ static int preinit(struct vo *vo)
 
   // disable video output
   amlsysfs_write_int(vo, "/sys/class/video/disable_video", 1);
+  amlsysfs_write_int(vo, "/sys/class/video/freerun_mode", 1);
 
-  amlsysfs_write_string(vo,"/sys/class/tsync/pts_video", "0x0");
+  //amlsysfs_write_string(vo,"/sys/class/tsync/pts_video", "0x0");
 
 //  amlsysfs_write_int(vo, "/sys/class/video/screen_mode", 1);
 
@@ -296,6 +383,33 @@ static int preinit(struct vo *vo)
   //amlsysfs_write_string(vo, "/sys/class/video/axis", "0 0 1920 1080");
 
   priv->mpv_start_pts = 0;
+
+#if USE_VFM
+  priv->vfm_fd = 0;
+
+  // open the ion device
+  if ((priv->vfm_fd = open(VFM_DEVICE_NAME, O_RDWR)) < 0)
+  {
+    MP_ERR(vo, "Failed to open %s\n", VFM_DEVICE_NAME);
+    return -1;
+  }
+
+  MP_VERBOSE(vo, "Initialization successful\n");
+#endif
+
+#if USE_AMV
+  priv->amv_fd = 0;
+
+  // open the ion device
+  if ((priv->amv_fd = open(AMVIDEO_DEVICE_NAME, O_RDWR)) < 0)
+  {
+    MP_ERR(vo, "Failed to open %s\n", AMVIDEO_DEVICE_NAME);
+    return -1;
+  }
+
+  MP_VERBOSE(vo, "Initialization successful\n");
+#endif
+
   return 0;
 }
 
