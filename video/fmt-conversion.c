@@ -116,6 +116,10 @@ static const struct {
     {IMGFMT_MMAL, AV_PIX_FMT_MMAL},
 #endif
 
+#if HAVE_AV_PIX_FMT_AML
+    {IMGFMT_AML, AV_PIX_FMT_AML},
+#endif
+
 #ifdef AV_PIX_FMT_P010
     {IMGFMT_P010, AV_PIX_FMT_P010},
 #endif

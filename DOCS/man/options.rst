@@ -604,6 +604,7 @@ Video
     :d3d11va-copy: copies video back to system RAM (Windows only)
     :mediacodec: copies video back to system RAM (Android only)
     :rpi:       requires ``--vo=rpi`` (Raspberry Pi only - default if available)
+    :aml:       requires ``--vo=aml`` (Amlogic only - default if available)
 
     ``auto`` tries to automatically enable hardware decoding using the first
     available method. This still depends what VO you are using. For example,

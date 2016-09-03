@@ -20,6 +20,7 @@ enum hwdec_type {
     HWDEC_D3D11VA,
     HWDEC_D3D11VA_COPY,
     HWDEC_RPI,
+    HWDEC_AML,
     HWDEC_MEDIACODEC,
 };
 
