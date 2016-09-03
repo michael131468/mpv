@@ -60,6 +60,7 @@ extern const struct vo_driver video_out_sdl;
 extern const struct vo_driver video_out_vaapi;
 extern const struct vo_driver video_out_wayland;
 extern const struct vo_driver video_out_rpi;
+extern const struct vo_driver video_out_aml;
 
 const struct vo_driver *const video_out_drivers[] =
 {
@@ -105,6 +106,9 @@ const struct vo_driver *const video_out_drivers[] =
 #endif
 #if HAVE_GL
     &video_out_opengl_cb,
+#endif
+#if HAVE_AML
+    &video_out_aml,
 #endif
     NULL
 };

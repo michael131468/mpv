@@ -451,6 +451,12 @@ FFmpeg/Libav libraries. You need at least {0}. Aborting.".format(libav_versions_
                                 'int x = AV_PIX_FMT_MMAL',
                                 use='libav'),
     }, {
+        'name': 'av-pix-fmt-aml',
+        'desc': 'libavutil AV_PIX_FMT_AML',
+        'func': check_statement('libavutil/pixfmt.h',
+                                'int x = AV_PIX_FMT_AML',
+                                use='libav'),
+    }, {
         'name': 'av-version-info',
         'desc': 'libavtuil av_version_info()',
         'func': check_statement('libavutil/avutil.h',
@@ -773,6 +779,17 @@ video_output_features = [
         'name': '--android',
         'desc': 'Android support',
         'func': check_statement('android/api-level.h', '(void)__ANDROID__'),  # arbitrary android-specific header
+    }, {
+        'name': '--aml',
+        'desc': 'AmLogic support',
+        'func': compose_checks(
+                check_cc(header_name=['amcodec/codec.h'],
+                         lib='amcodec'),
+                check_cc(lib="GLESv2"),
+                check_statement('GL/gl.h', '(void)GL_RGB32F'),     # arbitrary OpenGL 3.0 symbol
+                check_statement('GL/gl.h', '(void)GL_LUMINANCE16') # arbitrary OpenGL legacy-only symbol
+                ),
+
     }, {
         # We need MMAL/bcm_host/dispmanx APIs. Also, most RPI distros require
         # every project to hardcode the paths to the include directories. Also,

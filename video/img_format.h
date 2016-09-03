@@ -211,6 +211,7 @@ enum mp_imgfmt {
     IMGFMT_D3D11RGB,
     IMGFMT_DXVA2,           // IDirect3DSurface9 (NV12/P010/P016)
     IMGFMT_MMAL,            // MMAL_BUFFER_HEADER_T
+    IMGFMT_AML,             // AMLogic freerun frame format
     IMGFMT_VIDEOTOOLBOX,    // CVPixelBufferRef
 
     // Generic pass-through of AV_PIX_FMT_*. Used for formats which don't have
