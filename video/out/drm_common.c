@@ -150,7 +150,7 @@ static bool setup_connector(struct kms *kms, const drmModeRes *res,
     return true;
 }
 
-static bool setup_crtc(struct kms *kms, const drmModeRes *res)
+static bool setup_crtc(struct kms *kms, const drmModeRes *res, const drmModePlaneRes *plane_res)
 {
     for (unsigned int i = 0; i < kms->connector->count_encoders; ++i) {
         drmModeEncoder *encoder
@@ -161,6 +161,9 @@ static bool setup_crtc(struct kms *kms, const drmModeRes *res)
             continue;
         }
 
+        bool crtc_found = false;
+        int res_id;
+
         // iterate all global CRTCs
         for (unsigned int j = 0; j < res->count_crtcs; ++j) {
             // check whether this CRTC works with the encoder
@@ -169,9 +172,31 @@ static bool setup_crtc(struct kms *kms, const drmModeRes *res)
 
             kms->encoder = encoder;
             kms->crtc_id = res->crtcs[j];
-            return true;
+            crtc_found = true;
+            res_id = j;
+            break;
         }
 
+        if (crtc_found)
+        {
+            drmModePlane *plane;
+
+            kms->plane_id = -1;
+
+            for (unsigned int j = 0; j < plane_res->count_planes; j++)
+            {
+                plane = drmModeGetPlane (kms->fd, plane_res->planes[j]);
+                if (plane->possible_crtcs & (1 << res_id))
+                {
+                    kms->plane_id = plane->plane_id;
+                    drmModeFreePlane (plane);
+                    return true;
+                }
+
+                drmModeFreePlane (plane);
+            }
+
+        }
         drmModeFreeEncoder(encoder);
     }
 
@@ -240,6 +265,7 @@ struct kms *kms_create(struct mp_log *log, const char *connector_spec,
     };
 
     drmModeRes *res = NULL;
+    drmModePlaneRes *plane_res = NULL;
 
     if (kms->fd < 0) {
         mp_err(log, "Cannot open card \"%d\": %s.\n",
@@ -253,17 +279,27 @@ struct kms *kms_create(struct mp_log *log, const char *connector_spec,
         goto err;
     }
 
+    plane_res = drmModeGetPlaneResources(kms->fd);
+    if (!plane_res)
+    {
+        mp_err(log, "Cannot retrieve plane ressources\n");
+        goto err;
+    }
+
     if (!setup_connector(kms, res, connector_name))
         goto err;
-    if (!setup_crtc(kms, res))
+    if (!setup_crtc(kms, res, plane_res))
         goto err;
     if (!setup_mode(kms, mode_id))
         goto err;
 
+    drmModeFreePlaneResources(plane_res);
     drmModeFreeResources(res);
     return kms;
 
 err:
+    if (plane_res)
+        drmModeFreePlaneResources(plane_res);
     if (res)
         drmModeFreeResources(res);
     if (connector_name)

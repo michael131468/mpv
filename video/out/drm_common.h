@@ -30,6 +30,7 @@ struct kms {
     drmModeEncoder *encoder;
     drmModeModeInfo mode;
     uint32_t crtc_id;
+    uint32_t plane_id;
     int card_no;
 };
 

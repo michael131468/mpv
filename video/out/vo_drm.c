@@ -24,6 +24,7 @@
 #include <unistd.h>
 
 #include <libswscale/swscale.h>
+#include <libavcodec/drmprime.h>
 
 #include "drm_common.h"
 
@@ -75,7 +76,18 @@ struct priv {
     struct mp_rect dst;
     struct mp_osd_res osd;
     struct mp_sws_context *sws;
+
+    int has_prime_support;
+    int drmprimemode;
+
+    uint32_t next_fbid;
+    uint32_t last_fbid;
 };
+
+static bool isdrmprimeformat(int format)
+{
+    return (format == IMGFMT_RKMPP);
+}
 
 static void fb_destroy(int fd, struct framebuffer *buf)
 {
@@ -264,6 +276,8 @@ static int reconfig(struct vo *vo, struct mp_image_params *params)
 {
     struct priv *p = vo->priv;
 
+    p->drmprimemode = isdrmprimeformat(params->imgfmt) && p->has_prime_support;
+
     vo->dwidth = p->screen_w;
     vo->dheight = p->screen_h;
     vo_get_src_dst_rects(vo, &p->src, &p->dst, &p->osd);
@@ -291,18 +305,22 @@ static int reconfig(struct vo *vo, struct mp_image_params *params)
         .p_h = 1,
     };
 
-    talloc_free(p->cur_frame);
-    p->cur_frame = mp_image_alloc(IMGFMT, p->screen_w, p->screen_h);
-    mp_image_params_guess_csp(&p->sws->dst);
-    mp_image_set_params(p->cur_frame, &p->sws->dst);
+    if (!p->drmprimemode)
+    {
+        talloc_free(p->cur_frame);
+        p->cur_frame = mp_image_alloc(IMGFMT, p->screen_w, p->screen_h);
+        mp_image_params_guess_csp(&p->sws->dst);
+        mp_image_set_params(p->cur_frame, &p->sws->dst);
 
-    struct framebuffer *buf = p->bufs;
-    for (unsigned int i = 0; i < BUF_COUNT; i++)
-        memset(buf[i].map, 0, buf[i].size);
+        if (mp_sws_reinit(p->sws) < 0)
+            return -1;
 
-    if (mp_sws_reinit(p->sws) < 0)
-        return -1;
 
+        struct framebuffer *buf = p->bufs;
+        for (unsigned int i = 0; i < BUF_COUNT; i++)
+            memset(buf[i].map, 0, buf[i].size);
+
+    }
     vo->want_redraw = true;
     return 0;
 }
@@ -310,41 +328,122 @@ static int reconfig(struct vo *vo, struct mp_image_params *params)
 static void draw_image(struct vo *vo, mp_image_t *mpi)
 {
     struct priv *p = vo->priv;
+    int ret;
 
-    if (p->active) {
-        if (mpi) {
-            struct mp_image src = *mpi;
-            struct mp_rect src_rc = p->src;
-            src_rc.x0 = MP_ALIGN_DOWN(src_rc.x0, mpi->fmt.align_x);
-            src_rc.y0 = MP_ALIGN_DOWN(src_rc.y0, mpi->fmt.align_y);
-            mp_image_crop_rc(&src, src_rc);
-            mp_sws_scale(p->sws, p->cur_frame, &src);
-            osd_draw_on_image(vo->osd, p->osd, src.pts, 0, p->cur_frame);
-        } else {
-            mp_image_clear(p->cur_frame, 0, 0, p->cur_frame->w, p->cur_frame->h);
-            osd_draw_on_image(vo->osd, p->osd, 0, 0, p->cur_frame);
+    if (p->drmprimemode)
+    {
+        uint32_t gem_handle;
+        DRMPRIME_T *primedata = NULL;
+
+        if (mpi)
+            primedata = (DRMPRIME_T *)mpi->planes[0];
+
+        if (primedata)
+        {
+            ret = drmPrimeFDToHandle(p->kms->fd, primedata->fd, &gem_handle);
+            if (ret < 0)
+            {
+                MP_ERR(vo, "Failed to retrieve the Prime Handle.\n");
+                return;
+            }
+
+            uint32_t pitches[4] = { 0, 0, 0, 0};
+            uint32_t offsets[4] = { 0, 0, 0, 0};
+            uint32_t handles[4] = { 0, 0, 0, 0};
+            uint32_t fb_id = 0;
+
+
+            pitches[0] = primedata->strides[0];
+            offsets[0] = primedata->offsets[0];
+            handles[0] = gem_handle;
+            pitches[1] = primedata->strides[1];
+            offsets[1] = primedata->offsets[1];
+            handles[1] = gem_handle;
+
+            int srcw = p->src.x1 - p->src.x0;
+            int srch = p->src.y1 - p->src.y0;
+            int dstw = MP_ALIGN_UP(p->dst.x1 - p->dst.x0, 16);
+            int dsth = MP_ALIGN_UP(p->dst.y1 - p->dst.y0, 16);
+
+            ret = drmModeAddFB2(p->kms->fd, mpi->w, mpi->h, primedata->format,
+                                handles, pitches, offsets, &fb_id, 0);
+
+            if (ret < 0)
+            {
+                MP_ERR(vo, "Failed to add drm layer %d.\n", fb_id);
+                return;
+            }
+
+            MP_VERBOSE(vo, "draw_image : adding buffer id %d (%d x %d) -> (%d x %d)\n",
+                       fb_id, srcw, srch, dstw, dsth);
+
+            ret = drmModeSetPlane(p->kms->fd, p->kms->plane_id, p->kms->crtc_id, fb_id, 0,
+                                  p->dst.x0, p->dst.y0, dstw, dsth,
+                                  p->src.x0 << 16, p->src.y0 << 16 , srcw << 16, srch << 16);
+            if (ret < 0)
+            {
+                MP_ERR(vo, "Failed to set the planed %d.\n", p->kms->plane_id);
+                return;
+            }
+
+            MP_VERBOSE(vo, "last_fbid =%d, next_fbid =%d, last_input=%p, cur_frame=%p\n",
+                        p->last_fbid, p->next_fbid, p->last_input, p->cur_frame);
+
+            if (p->last_fbid != fb_id)
+            {
+                drmModeRmFB(p->kms->fd, p->last_fbid);
+                p->last_fbid = fb_id;
+            }
+
+            if (mpi != p->last_input)
+            {
+                talloc_free(p->last_input);
+                p->last_input = mpi;
+            }
+
+        }
+    }
+    else
+    {
+
+        if (p->active) {
+            if (mpi) {
+                struct mp_image src = *mpi;
+                struct mp_rect src_rc = p->src;
+                src_rc.x0 = MP_ALIGN_DOWN(src_rc.x0, mpi->fmt.align_x);
+                src_rc.y0 = MP_ALIGN_DOWN(src_rc.y0, mpi->fmt.align_y);
+                mp_image_crop_rc(&src, src_rc);
+                mp_sws_scale(p->sws, p->cur_frame, &src);
+                osd_draw_on_image(vo->osd, p->osd, src.pts, 0, p->cur_frame);
+            } else {
+                mp_image_clear(p->cur_frame, 0, 0, p->cur_frame->w, p->cur_frame->h);
+                osd_draw_on_image(vo->osd, p->osd, 0, 0, p->cur_frame);
+            }
+
+            struct framebuffer *front_buf = &p->bufs[p->front_buf];
+            int w = p->dst.x1 - p->dst.x0;
+            int h = p->dst.y1 - p->dst.y0;
+            int x = (p->screen_w - w) >> 1;
+            int y = (p->screen_h - h) >> 1;
+            int shift = y * front_buf->stride + x * BYTES_PER_PIXEL;
+            memcpy_pic(front_buf->map + shift, p->cur_frame->planes[0],
+                       w * BYTES_PER_PIXEL, h, front_buf->stride,
+                       p->cur_frame->stride[0]);
         }
 
-        struct framebuffer *front_buf = &p->bufs[p->front_buf];
-        int w = p->dst.x1 - p->dst.x0;
-        int h = p->dst.y1 - p->dst.y0;
-        int x = (p->screen_w - w) >> 1;
-        int y = (p->screen_h - h) >> 1;
-        int shift = y * front_buf->stride + x * BYTES_PER_PIXEL;
-        memcpy_pic(front_buf->map + shift, p->cur_frame->planes[0],
-                   w * BYTES_PER_PIXEL, h, front_buf->stride,
-                   p->cur_frame->stride[0]);
+        if (mpi != p->last_input) {
+            talloc_free(p->last_input);
+            p->last_input = mpi;
+        }
     }
 
-    if (mpi != p->last_input) {
-        talloc_free(p->last_input);
-        p->last_input = mpi;
-    }
+
 }
 
 static void flip_page(struct vo *vo)
 {
     struct priv *p = vo->priv;
+
     if (!p->active || p->pflip_happening)
         return;
 
@@ -372,6 +471,8 @@ static void flip_page(struct vo *vo)
             return;
         }
     }
+
+
 }
 
 static void uninit(struct vo *vo)
@@ -428,6 +529,13 @@ static int preinit(struct vo *vo)
         goto err;
     }
 
+    uint64_t has_prime;
+    if (drmGetCap(p->kms->fd, DRM_CAP_PRIME, &has_prime) < 0) {
+        MP_INFO(vo, "Card \"%d\" does not support prime handles.\n",
+               p->kms->card_no);
+    }
+    p->has_prime_support = has_prime;
+
     p->screen_w = p->bufs[0].width;
     p->screen_h = p->bufs[0].height;
 
@@ -445,7 +553,8 @@ err:
 
 static int query_format(struct vo *vo, int format)
 {
-    return sws_isSupportedInput(imgfmt2pixfmt(format));
+    return ((format == IMGFMT_RKMPP) ||
+            sws_isSupportedInput(imgfmt2pixfmt(format)));
 }
 
 static int control(struct vo *vo, uint32_t request, void *arg)

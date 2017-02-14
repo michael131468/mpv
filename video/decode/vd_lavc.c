@@ -150,6 +150,14 @@ static const struct vd_lavc_hwdec mp_vd_lavc_rpi_copy = {
 };
 #endif
 
+#if HAVE_RKMPP
+static const struct vd_lavc_hwdec mp_vd_lavc_rkmpp = {
+    .type = HWDEC_RKMPP,
+    .lavc_suffix = "_rkmpp",
+    .image_format = IMGFMT_RKMPP,
+};
+#endif
+
 #if HAVE_ANDROID
 static const struct vd_lavc_hwdec mp_vd_lavc_mediacodec = {
     .type = HWDEC_MEDIACODEC,
@@ -203,6 +211,9 @@ static const struct vd_lavc_hwdec *const hwdec_list[] = {
     &mp_vd_lavc_cuda_copy,
 #endif
     &mp_vd_lavc_crystalhd,
+#if HAVE_RKMPP
+    &mp_vd_lavc_rkmpp,
+#endif
     NULL
 };
 
@@ -485,7 +496,7 @@ static void init_avctx(struct dec_video *vd, const char *decoder,
     ctx->codec_timebase = mp_get_codec_timebase(vd->codec);
 
     // This decoder does not read pkt_timebase correctly yet.
-    if (strstr(decoder, "_mmal"))
+    if ((strstr(decoder, "_mmal")) || (strstr(decoder, "_rkmpp")))
         ctx->codec_timebase = (AVRational){1, 1000000};
 
     ctx->pix_fmt = AV_PIX_FMT_NONE;

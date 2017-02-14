@@ -784,6 +784,16 @@ video_output_features = [
             check_statement('GL/gl.h', '(void)GL_LUMINANCE16') # arbitrary OpenGL legacy-only symbol
         ),
     }, {
+        'name': '--rkmpp',
+        'desc': 'RockChip MPP  support',
+        'func': compose_checks(
+                check_cc(header_name=['rockchip/rk_mpi.h'],
+                         lib='rockchip_mpp'),
+                check_cc(lib="GLESv2"),
+                check_statement('GL/gl.h', '(void)GL_RGB32F'),     # arbitrary OpenGL 3.0 symbol
+                check_statement('GL/gl.h', '(void)GL_LUMINANCE16') # arbitrary OpenGL legacy-only symbol
+                ),
+    }, {
         'name': '--standard-gl',
         'desc': 'Desktop standard OpenGL support',
         'func': compose_checks(
