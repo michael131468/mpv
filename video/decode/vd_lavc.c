@@ -156,6 +156,11 @@ static const struct vd_lavc_hwdec mp_vd_lavc_rkmpp = {
     .lavc_suffix = "_rkmpp",
     .image_format = IMGFMT_RKMPP,
 };
+static const struct vd_lavc_hwdec mp_vd_lavc_rkmpp_copy = {
+    .type = HWDEC_RKMPP_COPY,
+    .lavc_suffix = "_rkmpp",
+    .copying = true,
+};
 #endif
 
 #if HAVE_ANDROID
@@ -213,6 +218,7 @@ static const struct vd_lavc_hwdec *const hwdec_list[] = {
     &mp_vd_lavc_crystalhd,
 #if HAVE_RKMPP
     &mp_vd_lavc_rkmpp,
+    &mp_vd_lavc_rkmpp_copy,
 #endif
     NULL
 };
