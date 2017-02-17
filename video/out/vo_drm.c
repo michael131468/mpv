@@ -333,10 +333,10 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
     if (p->drmprimemode)
     {
         uint32_t gem_handle;
-        DRMPRIME_T *primedata = NULL;
+        av_drmprime *primedata = NULL;
 
         if (mpi)
-            primedata = (DRMPRIME_T *)mpi->planes[0];
+            primedata = (av_drmprime *)mpi->planes[3];
 
         if (primedata)
         {
