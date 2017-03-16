@@ -444,7 +444,7 @@ static void flip_page(struct vo *vo)
 {
     struct priv *p = vo->priv;
 
-    if (!p->active || p->pflip_happening)
+    if (!p->active || p->pflip_happening || p->has_prime_support)
         return;
 
     int ret = drmModePageFlip(p->kms->fd, p->kms->crtc_id,
