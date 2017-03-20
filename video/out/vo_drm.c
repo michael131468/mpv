@@ -124,7 +124,7 @@ static bool fb_setup_single(struct vo *vo, int fd, struct framebuffer *buf)
     buf->handle = creq.handle;
 
     // create framebuffer object for the dumb-buffer
-    if (drmModeAddFB(fd, buf->width, buf->height, 24, creq.bpp, buf->stride,
+    if (drmModeAddFB(fd, buf->width, buf->height, 32, creq.bpp, buf->stride,
                      buf->handle, &buf->fb)) {
         MP_ERR(vo, "Cannot create framebuffer: %s\n", mp_strerror(errno));
         goto err;
