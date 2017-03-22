@@ -79,6 +79,7 @@ struct priv {
 
     int has_prime_support;
     int drmprimemode;
+    int use_framebuffer;
 
     uint32_t next_fbid;
     uint32_t last_fbid;
@@ -124,7 +125,7 @@ static bool fb_setup_single(struct vo *vo, int fd, struct framebuffer *buf)
     buf->handle = creq.handle;
 
     // create framebuffer object for the dumb-buffer
-    if (drmModeAddFB(fd, buf->width, buf->height, 24, creq.bpp, buf->stride,
+    if (drmModeAddFB(fd, buf->width, buf->height, 32, creq.bpp, buf->stride,
                      buf->handle, &buf->fb)) {
         MP_ERR(vo, "Cannot create framebuffer: %s\n", mp_strerror(errno));
         goto err;
@@ -352,7 +353,6 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
             uint32_t handles[4] = { 0, 0, 0, 0};
             uint32_t fb_id = 0;
 
-
             pitches[0] = primedata->strides[0];
             offsets[0] = primedata->offsets[0];
             handles[0] = gem_handle;
@@ -374,9 +374,6 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
                 return;
             }
 
-            MP_VERBOSE(vo, "draw_image : adding buffer id %d (%d x %d) -> (%d x %d)\n",
-                       fb_id, srcw, srch, dstw, dsth);
-
             ret = drmModeSetPlane(p->kms->fd, p->kms->plane_id, p->kms->crtc_id, fb_id, 0,
                                   p->dst.x0, p->dst.y0, dstw, dsth,
                                   p->src.x0 << 16, p->src.y0 << 16 , srcw << 16, srch << 16);
@@ -385,9 +382,6 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
                 MP_ERR(vo, "Failed to set the planed %d.\n", p->kms->plane_id);
                 return;
             }
-
-            MP_VERBOSE(vo, "last_fbid =%d, next_fbid =%d, last_input=%p, cur_frame=%p\n",
-                        p->last_fbid, p->next_fbid, p->last_input, p->cur_frame);
 
             if (p->last_fbid != fb_id)
             {
@@ -444,7 +438,7 @@ static void flip_page(struct vo *vo)
 {
     struct priv *p = vo->priv;
 
-    if (!p->active || p->pflip_happening || p->has_prime_support)
+    if (!p->active || p->pflip_happening || (!p->use_framebuffer))
         return;
 
     int ret = drmModePageFlip(p->kms->fd, p->kms->crtc_id,
@@ -517,9 +511,17 @@ static int preinit(struct vo *vo)
         goto err;
     }
 
-    if (!fb_setup_double_buffering(vo)) {
-        MP_ERR(vo, "Failed to set up double buffering.\n");
-        goto err;
+    if (p->use_framebuffer) {
+        if (!fb_setup_double_buffering(vo)) {
+            MP_ERR(vo, "Failed to set up double buffering.\n");
+            goto err;
+        }
+    }
+    else {
+        for (unsigned int i = 0; i < 2; i++) {
+            p->bufs[i].width = p->kms->mode.hdisplay;
+            p->bufs[i].height = p->kms->mode.vdisplay;
+        }
     }
 
     uint64_t has_dumb;
@@ -539,9 +541,11 @@ static int preinit(struct vo *vo)
     p->screen_w = p->bufs[0].width;
     p->screen_h = p->bufs[0].height;
 
-    if (!crtc_setup(vo)) {
-        MP_ERR(vo, "Cannot set CRTC: %s\n", mp_strerror(errno));
-        goto err;
+    if (p->use_framebuffer) {
+        if (!crtc_setup(vo)) {
+            MP_ERR(vo, "Cannot set CRTC: %s\n", mp_strerror(errno));
+            goto err;
+        }
     }
 
     return 0;
@@ -583,6 +587,10 @@ static int control(struct vo *vo, uint32_t request, void *arg)
 }
 
 #define OPT_BASE_STRUCT struct priv
+static const struct m_option options[] = {
+    OPT_FLAG("use-framebuffer", use_framebuffer, 0, OPTDEF_INT(1)),
+    {0},
+};
 
 const struct vo_driver video_out_drm = {
     .name = "drm",
@@ -597,4 +605,6 @@ const struct vo_driver video_out_drm = {
     .wait_events = wait_events,
     .wakeup = wakeup,
     .priv_size = sizeof(struct priv),
+    .options = options,
+    .options_prefix = "drm",
 };
