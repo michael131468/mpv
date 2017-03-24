@@ -186,7 +186,7 @@ err:
     return -1;
 }
 
-const struct gl_hwdec_driver gl_hwdec_rkmpp = {
+const struct gl_hwdec_driver gl_hwdec_rkmpp_egl = {
     .name = "rkmpp-egl",
     .api = HWDEC_RKMPP,
     .imgfmt = IMGFMT_RKMPP,
